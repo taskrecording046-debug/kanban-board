@@ -5,12 +5,23 @@ const { pool } = require("../db");
 
 const router = express.Router();
 
-// GET /api/board
+// GET /api/board?assignee=<userId>
 // Returns columns (ordered) each with their tasks (ordered), and each task
 // carries its author, labels, and comment count. Built as a small number
 // of set-based queries, then assembled in JS.
+//
+// An optional `assignee` filters tasks to a single author. A small
+// artificial delay is added below so request-timing effects (which exist
+// in production with real network/query latency) are easy to observe
+// locally; it is NOT the bug and can be removed without affecting it.
 router.get("/board", async (req, res) => {
+  const assignee = req.query.assignee ? Number(req.query.assignee) : null;
   try {
+    // Simulated latency, inversely related to assignee id, so that
+    // switching filters quickly produces out-of-order responses.
+    const delayMs = assignee ? Math.max(50, 600 - assignee * 120) : 300;
+    await new Promise((r) => setTimeout(r, delayMs));
+
     const { rows: columns } = await pool.query(
       `SELECT id, name, position FROM columns ORDER BY position`
     );
@@ -25,7 +36,9 @@ router.get("/board", async (req, res) => {
          LEFT JOIN (
            SELECT task_id, COUNT(*)::int AS cnt FROM comments GROUP BY task_id
          ) cc ON cc.task_id = t.id
-        ORDER BY t.column_id, t.position`
+        WHERE ($1::int IS NULL OR t.author_id = $1)
+        ORDER BY t.column_id, t.position`,
+      [assignee]
     );
 
     const { rows: taskLabels } = await pool.query(

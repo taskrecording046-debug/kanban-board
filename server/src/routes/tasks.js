@@ -3,7 +3,6 @@
 
 const express = require("express");
 const { pool } = require("../db");
-const { reorderTaskInColumn } = require("../reorder-service");
 
 const router = express.Router();
 
@@ -105,8 +104,7 @@ router.patch("/tasks/:id", async (req, res) => {
   }
 });
 
-// POST /api/tasks/:id/move  — move a task to a column at a position,
-// shifting the column's other tasks to keep positions contiguous.
+// POST /api/tasks/:id/move  — move a task to a column at a position.
 router.post("/tasks/:id/move", async (req, res) => {
   const id = Number(req.params.id);
   const { columnId, position } = req.body || {};
@@ -114,8 +112,13 @@ router.post("/tasks/:id/move", async (req, res) => {
     return res.status(400).json({ error: "columnId and position are required." });
   }
   try {
-    const result = await reorderTaskInColumn(id, columnId, position);
-    res.json({ task: result });
+    const { rows } = await pool.query(
+      `UPDATE tasks SET column_id = $2, position = $3, updated_at = now()
+        WHERE id = $1 RETURNING id, column_id, position`,
+      [id, columnId, position]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: "Task not found." });
+    res.json({ task: rows[0] });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Failed to move task." });
